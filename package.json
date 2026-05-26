@@ -6,7 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
-    "postinstall": "npx puppeteer browsers install chrome"
+    "postinstall": "PUPPETEER_SKIP_DOWNLOAD=false npx puppeteer install"
   },
   "keywords": [],
   "author": "",
