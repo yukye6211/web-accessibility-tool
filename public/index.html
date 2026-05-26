@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>Webアクセシビリティ評価ツール</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+      padding: 18px;
+      background: #f5f7fa;
+      color: #222;
+    }
+    .card {
+      background:#fff;
+      padding:16px;
+      border-radius:10px;
+      margin-bottom:18px;
+      box-shadow:0 2px 8px rgba(0,0,0,0.06);
+    }
+    h1 { margin:0 0 8px 0; font-size:22px; }
+    h2 { margin:0 0 8px 0; font-size:18px; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    input[type="text"] { width:420px; padding:8px; border-radius:6px; border:1px solid #d0d7de; }
+    button {
+      padding:8px 12px; border-radius:6px; border:none; background:#3f8cff; color:#fff; cursor:pointer;
+      font-size:14px;
+    }
+    button.ghost { background:#e6eefc; color:#1f6fe0; border:1px solid #d7e6ff; }
+    button.small { padding:6px 10px; font-size:13px; }
+    button:disabled { opacity:0.6; cursor:not-allowed; }
+    #status { margin-left:10px; font-weight:bold; color:#333; }
+    /* score */
+    #score {
+      background:#e8f0ff; border:2px solid #aac7ff; color:#1d4ed8; padding:8px 16px; border-radius:20px;
+      font-weight:700; font-size:16px;
+    }
+    .muted { color:#666; font-size:13px; margin-left:8px; }
+    /* impact pills */
+    .pill { padding:4px 8px; border-radius:999px; font-size:12px; border:1px solid #ddd; display:inline-flex; align-items:center; gap:6px; }
+    .pill.critical { background:#fde2e2; border-color:#f7b4b4; }
+    .pill.serious  { background:#fff3e0; border-color:#ffd2a6; }
+    .pill.moderate { background:#fffde0; border-color:#f6e9a0; }
+    .pill.minor    { background:#e9f6ff; border-color:#c9e3ff; }
+
+    table { width:100%; border-collapse:collapse; margin-top:12px; }
+    th, td { border:1px solid #e6e9ee; padding:10px; vertical-align:top; text-align:left; }
+    th { background:#fafafa; font-weight:600; color:#333; }
+    /* severity buttons */
+    .severity-group { display:flex; gap:8px; align-items:center; margin-left:8px; }
+    .severity-btn {
+      background:#f4f6fb; color:#333; border:1px solid #d9e3ff; padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:600;
+    }
+    .severity-btn.active { background:#1f6fe0; color:#fff; border-color:#1959c9; box-shadow:0 2px 6px rgba(31,111,224,0.18); }
+    /* canvas */
+    #simCanvas { display:block; width:100%; max-width:1100px; height:auto; margin-top:12px; border:1px solid #e0e6ef; border-radius:6px; background:#fff; }
+    .hint { font-size:13px; color:#666; margin-top:6px; }
+    /* layout small screens */
+    @media (max-width:800px){
+      input[type="text"]{ width:100%; }
+      .row{ align-items:flex-start; }
+      #score{ margin-top:8px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- 入力 -->
+  <div class="card">
+    <h1>Webアクセシビリティ評価ツール</h1>
+    <div class="row" style="align-items:center;">
+      <label for="url">URL：</label>
+      <!-- デベロッパ指示による既存アップロードファイルパス（必要に応じて変更してください） -->
+      <input id="url" type="text"  aria-label="評価したいURLまたはファイルパス" />
+      <button id="btn-eval" class="small">評価</button>
+      <button id="btn-csv" class="small ghost">CSV</button>
+      <span id="status" role="status" aria-live="polite"></span>
+    </div>
+  </div>
+
+  <!-- 評価結果 -->
+  <div class="card">
+    <h2>評価結果</h2>
+    <div class="row">
+      <div id="score">スコア — /100</div>
+      <div id="summary" class="muted">致命的:0件 / 重大:0件 / 中程度:0件 / 軽微:0件</div>
+    </div>
+
+    <div style="margin-top:10px" class="row">
+      <strong>表示フィルタ：</strong>
+      <label class="pill critical"><input type="checkbox" class="impact-filter" value="critical" checked> 致命的</label>
+      <label class="pill serious"><input type="checkbox" class="impact-filter" value="serious" checked> 重大</label>
+      <label class="pill moderate"><input type="checkbox" class="impact-filter" value="moderate" checked> 中程度</label>
+      <label class="pill minor"><input type="checkbox" class="impact-filter" value="minor" checked> 軽微</label>
+    </div>
+
+    <table id="resultTable" aria-live="polite">
+      <thead>
+        <tr><th>問題ID</th><th>重要度</th><th>問題点/対処方法</th><th>該当箇所（CSSセレクタ）</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- シミュレーション -->
+  <div class="card">
+    <h2>見え方シミュレーション</h2>
+
+    <div class="row" style="align-items:center;">
+      <label for="sim-type">タイプ：</label>
+      <select id="sim-type" aria-label="シミュレーションタイプ">
+        <option value="cataract">白内障</option>
+        <option value="deutan">緑色弱（Deuteranomaly）</option>
+        <option value="protan">赤色弱（Protanomaly）</option>
+      </select>
+
+      <!-- severity buttons group (C案) -->
+      <div style="margin-left:16px; display:flex; align-items:center;">
+        <label>白内障の進行度：</label>
+        <div class="severity-group" id="severityGroup" role="tablist" aria-label="白内障の進行度">
+          <button class="severity-btn" data-level="mild" id="sev-mild" role="tab" aria-selected="true">軽度</button>
+          <button class="severity-btn" data-level="moderate" id="sev-moderate" role="tab" aria-selected="false">中等度</button>
+          <button class="severity-btn" data-level="severe" id="sev-severe" role="tab" aria-selected="false">重度</button>
+        </div>
+      </div>
+
+      <button id="btn-sim" class="small" style="margin-left:12px;">生成</button>
+    </div>
+
+    <div id="videoNotice" style="
+      margin-top:10px;
+      padding:12px;
+      background:#f0f7ff;
+      border-left:4px solid #3f8cff;
+      border-radius:6px;
+      font-size:14px;
+      color:#333;
+    ">
+      <strong>※本ツールの適用範囲について</strong><br>
+      見え方シミュレーションは、Webページを静止画像として取得し評価しています。<br>
+      動画・アニメーション・動的に変化するコンテンツを含むページでは、
+      実際の視認性と異なる結果が表示される可能性があります。
+    </div>
+
+    <div class="hint">注：ボタンはモデル（軽度/中等度/重度）に対応しています。タイプが白内障のときのみ有効です。</div>
+    <canvas id="simCanvas" width="1100" height="700" aria-label="見え方シミュレーションのキャンバス"></canvas>
+  </div>
+
+  <script>
+    // 初期設定とユーティリティ
+    document.addEventListener('DOMContentLoaded', () => {
+      // Elements
+      const btnEval = document.getElementById('btn-eval');
+      const btnCSV = document.getElementById('btn-csv');
+      const statusEl = document.getElementById('status');
+      const scoreEl = document.getElementById('score');
+      const summaryEl = document.getElementById('summary');
+      const tableBody = document.querySelector('#resultTable tbody');
+      const simType = document.getElementById('sim-type');
+      const btnSim = document.getElementById('btn-sim');
+      const canvas = document.getElementById('simCanvas');
+      const ctx = canvas.getContext('2d');
+
+      // severity buttons
+      const sevButtons = Array.from(document.querySelectorAll('.severity-btn'));
+      let selectedSeverity = 'mild'; // A 初期: 軽度
+
+      // last results storage
+      let lastResults = null;
+
+      // attach listeners
+      btnEval.addEventListener('click', evaluate);
+      btnCSV.addEventListener('click', downloadCSV);
+      btnSim.addEventListener('click', simulateVision);
+      document.querySelectorAll('.impact-filter').forEach(cb => cb.addEventListener('change', renderTable));
+      simType.addEventListener('change', onSimTypeChange);
+
+      // severity button events
+      sevButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          // if simType != cataract, ignore
+          if (simType.value !== 'cataract') return;
+          setActiveSeverity(btn.dataset.level);
+        });
+      });
+
+      // set initial severity active (軽度)
+      setActiveSeverity('mild');
+
+      // show/hide severity group depending on sim type
+      function onSimTypeChange() {
+        const group = document.getElementById('severityGroup');
+        if (simType.value === 'cataract') {
+          group.style.display = 'flex';
+          // ensure keyboard focus outlines visible
+        } else {
+          group.style.display = 'none';
+        }
+      }
+      onSimTypeChange();
+
+      // set active severity ui + var
+      function setActiveSeverity(level) {
+        selectedSeverity = level;
+        sevButtons.forEach(b => {
+          const active = b.dataset.level === level;
+          b.classList.toggle('active', active);
+          b.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+      }
+
+      // -------------------------
+      // i18n helpers (日本語変換)
+      function jpImpact(level) {
+        switch (level) {
+          case 'critical': return '致命的';
+          case 'serious':  return '重大';
+          case 'moderate': return '中程度';
+          case 'minor':    return '軽微';
+          default: return level || '不明';
+        }
+      }
+      function jpHelp(id, helpText) {
+        const dict = {
+          'color-contrast': '文字色と背景色のコントラストが不足しています',
+          'link-name': 'リンクに説明的なテキスト（ラベル）が必要です',
+          'link-in-text-block': '周囲の本文とリンクの見た目が同じです',
+          'area-alt': '画像リンクに説明がありません',
+          'list': 'リストの構造が不明確です',
+          'image-alt': '画像に代替テキスト（alt）を設定してください'
+        };
+        return dict[id] || (helpText || '');
+      }
+      function jisMap(id) {
+        const m = {
+          'color-contrast': 'JIS X 8341-3:2016 1.4.3（コントラスト最小）',
+          'link-name': 'JIS X 8341-3:2016 2.4.4 / 4.1.2（リンク目的／名前・役割・値）',
+          'link-in-text-block': 'JIS X 8341-3:2016 1.4.1（色の使用に依存しない）'
+        };
+        return m[id] || '';
+      }
+
+      // -------------------------
+      // Evaluate API call (server.js の /evaluate を利用)
+      async function evaluate() {
+        const url = document.getElementById('url').value.trim();
+        if (!url) { statusEl.textContent = 'URLを入力してください'; return; }
+        statusEl.textContent = '評価中…';
+        try {
+          const res = await fetch(`/evaluate?url=${encodeURIComponent(url)}`);
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+          lastResults = data;
+          statusEl.textContent = '評価完了';
+          scoreEl.textContent = `スコア ${data.score ?? '—'} /100（違反 ${data.violations?.length ?? 0} 件）`;
+          updateSummary();
+          renderTable();
+        } catch (e) {
+          console.error(e);
+          statusEl.textContent = `エラー: ${e.message || e}`;
+        }
+      }
+
+      function updateSummary() {
+        const cnt = { critical:0, serious:0, moderate:0, minor:0 };
+        (lastResults?.violations || []).forEach(v => cnt[v.impact || 'minor']++);
+        summaryEl.textContent = `致命的:${cnt.critical}件 / 重大:${cnt.serious}件 / 中程度:${cnt.moderate}件 / 軽微:${cnt.minor}件`;
+      }
+
+      function getActiveImpacts() {
+        return Array.from(document.querySelectorAll('.impact-filter')).filter(cb => cb.checked).map(cb => cb.value);
+      }
+
+      function renderTable() {
+        tableBody.innerHTML = '';
+        if (!lastResults?.violations) return;
+        const active = new Set(getActiveImpacts());
+        const order = { critical:0, serious:1, moderate:2, minor:3 };
+        const rows = lastResults.violations.filter(v => active.has(v.impact || 'minor'))
+          .sort((a,b) => (order[a.impact||'minor'] - order[b.impact||'minor']));
+        rows.forEach(v => {
+          const tr = document.createElement('tr');
+          const nodes = (v.nodes || []).slice(0,6).map(n => Array.isArray(n.target) ? n.target.join(', ') : n.target).join('<br>');
+          tr.innerHTML = `
+            <td>${escapeHtml(v.id || '')}</td>
+            <td>${escapeHtml(jpImpact(v.impact))}</td>
+            <td>
+              <div style="font-weight:700">${escapeHtml(jpHelp(v.id, v.help))}</div>
+              ${v.helpUrl ? `<div><a href="${v.helpUrl}" target="_blank" rel="noopener">詳細ガイド</a></div>` : ''}
+              <div class="muted">${escapeHtml(v.description || '')}</div>
+              <div class="muted"><em>${escapeHtml(jisMap(v.id))}</em></div>
+            </td>
+            <td>${nodes}</td>
+          `;
+          tableBody.appendChild(tr);
+        });
+      }
+
+      function downloadCSV() {
+        if (!lastResults || !lastResults.violations) { alert('先に評価を実行してください'); return; }
+        const active = new Set(getActiveImpacts());
+        const rows = [['url','score','id','impact(日本語)','help(日本語)','description','targets']];
+        lastResults.violations.filter(v => active.has(v.impact || 'minor')).forEach(v => {
+          const targets = (v.nodes||[]).map(n => Array.isArray(n.target)? n.target.join('|') : n.target).join(' || ');
+          rows.push([ lastResults.url || '', lastResults.score ?? '', v.id || '', jpImpact(v.impact || ''), jpHelp(v.id, v.help || ''), (v.description || '').replace(/\r?\n/g,' '), targets ]);
+        });
+        const csv = rows.map(r => r.map(x => `"${String(x).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'axe_results_filtered.csv'; a.click(); URL.revokeObjectURL(a.href);
+      }
+
+      function escapeHtml(s) {
+        return String(s || '').replace(/[&<>"'`=\/]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','/':'&#x2F;','`':'&#x60;','=':'&#x3D;'}[m]));
+      }
+
+      // -------------------------
+      // Simulation: 医学モデル（白内障度合いを「軽度/中等度/重度」で適用）
+      //
+      // モデルの要点（実装上の説明）
+      // - 軽度: 軽いぼかし、やや明るめ、軽いコントラスト低下
+      // - 中等度: ぼかし強め、明るめ、コントラスト低下
+      // - 重度: 強いぼかし、かなり明るめ、コントラスト大幅低下（視界がかなり霞む想定）
+      //
+      // 実際の医学的尺度は専門家の評価が必要ですが、UIには軽度/中等度/重度のラベルで
+      // 現実的な視感の差が分かるようにパラメータを設定しています。
+
+      async function simulateVision() {
+        const url = document.getElementById('url').value.trim();
+        if (!url) { alert('URLを入力してください'); return; }
+
+        // 取得: サーバー側の /screenshot?url=... を利用してページ全体のPNGを取得
+        const screenshotUrl = `/screenshot?url=${encodeURIComponent(url)}&t=${Date.now()}`; // キャッシュ回避
+        try {
+          // 画像を読み込む
+          const img = new Image();
+          img.crossOrigin = "Anonymous"; // サーバーが同一オリジンで返していればOK
+          img.src = screenshotUrl;
+
+          // show loading
+          statusEl.textContent = 'シミュレーション生成中…';
+
+          await new Promise((resolve, reject) => {
+            img.onload = () => resolve();
+            img.onerror = (e) => reject(new Error('スクリーンショット取得 / 読込エラー'));
+          });
+
+          // canvas に描画（幅を調整）
+          const maxW = Math.min(1100, img.width);
+          const scale = maxW / img.width;
+          const drawW = Math.round(img.width * scale);
+          const drawH = Math.round(img.height * scale);
+
+          canvas.width = drawW;
+          canvas.height = drawH;
+          ctx.clearRect(0,0,canvas.width,canvas.height);
+
+          // ベース描画
+          ctx.drawImage(img, 0, 0, drawW, drawH);
+
+          // get image data for pixel ops when needed (color blindness)
+          const imgData = ctx.getImageData(0,0,drawW,drawH);
+          const data = imgData.data;
+
+          // choose transform based on sim type
+          if (simType.value === 'cataract') {
+            // severity -> numerical parameters
+            // 以下は感覚的にわかる設定（医学的スコアではなく「見た目」を優先）
+            let blurPx, brightnessFactor, contrastFactor, desaturate;
+            switch (selectedSeverity) {
+              case 'mild':
+                blurPx = 2; brightnessFactor = 1.08; contrastFactor = 0.92; desaturate = 0.04;
+                break;
+              case 'moderate':
+                blurPx = 5; brightnessFactor = 1.16; contrastFactor = 0.8; desaturate = 0.08;
+                break;
+              case 'severe':
+                blurPx = 10; brightnessFactor = 1.30; contrastFactor = 0.65; desaturate = 0.14;
+                break;
+              default:
+                blurPx = 3; brightnessFactor = 1.1; contrastFactor = 0.9; desaturate = 0.06;
+            }
+
+            // 方法：
+            // 1) まずピクセル操作で明度・彩度（色飽和）を調整（より医療寄りに見えやすく）
+            // 2) その上で canvas.filter による blur/brightness/contrast を描画
+
+            // 1) 色のわずかな脱飽和（白内障では色のコントラストが鈍る例がある）
+            if (desaturate > 0) {
+              for (let i = 0; i < data.length; i += 4) {
+                const r = data[i], g = data[i+1], b = data[i+2];
+                // convert to grayscale mix
+                const gray = 0.2989*r + 0.5870*g + 0.1140*b;
+                data[i]   = r*(1-desaturate) + gray*desaturate;
+                data[i+1] = g*(1-desaturate) + gray*desaturate;
+                data[i+2] = b*(1-desaturate) + gray*desaturate;
+              }
+              ctx.putImageData(imgData, 0, 0);
+            }
+
+            // 2) フィルター（blur/brightness/contrast）を乗せる
+            // note: contrast() expects >0 (1 = no change). We use CSS contrast scale.
+            ctx.filter = `blur(${blurPx}px) brightness(${brightnessFactor}) contrast(${contrastFactor})`;
+            // 混合のために一旦別キャンバスへコピーしてフィルターをかける
+            const tmp = document.createElement('canvas');
+            tmp.width = drawW; tmp.height = drawH;
+            const tctx = tmp.getContext('2d');
+            tctx.drawImage(canvas, 0, 0);
+            // 描画先にフィルター適用で描き戻す
+            ctx.clearRect(0,0,drawW,drawH);
+            ctx.filter = `blur(${blurPx}px) brightness(${brightnessFactor}) contrast(${contrastFactor})`;
+            ctx.drawImage(tmp, 0, 0);
+            // reset filter
+            ctx.filter = 'none';
+
+          } else if (simType.value === 'deutan' || simType.value === 'protan') {
+            // 色盲系：ピクセル操作で擬似的に色感度を変化させる
+            for (let i = 0; i < data.length; i += 4) {
+              const r = data[i], g = data[i+1], b = data[i+2];
+              if (simType.value === 'deutan') {
+                // Deuteranomaly: 緑の感度を低下させ混色
+                data[i]   = Math.round(0.8*r + 0.2*g);
+                data[i+1] = Math.round(0.5*g + 0.5*r);
+                data[i+2] = b;
+              } else {
+                // Protanomaly: 赤の感度を低下
+                data[i]   = Math.round(0.6*r + 0.4*g);
+                data[i+1] = g;
+                data[i+2] = b;
+              }
+            }
+            ctx.putImageData(imgData, 0, 0);
+          } else {
+            // 未知タイプはそのまま
+          }
+
+          statusEl.textContent = '生成完了';
+        } catch (err) {
+          console.error(err);
+          statusEl.textContent = 'シミュレーション失敗: ' + (err.message || err);
+          alert('見え方の生成に失敗しました。サーバーが稼働中で、/screenshot が利用可能か確認してください。');
+        }
+      }
+
+      // end of DOMContentLoaded
+    }); // DOMContentLoaded
+  </script>
+</body>
+</html>
