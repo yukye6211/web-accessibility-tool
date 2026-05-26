@@ -85,7 +85,9 @@ app.get("/screenshot", async (req, res) => {
     if (!url) return res.status(400).send("URLが指定されていません");
 
     try {
-        const browser = await puppeteer.launch({ headless: "new" });
+        const browser = await puppeteer.launch({
+        headless: "new",
+        args: ['--no-sandbox', '--disable-setuid-sandbox']});
         const page = await browser.newPage();
         await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
         const buffer = await page.screenshot({ fullPage: true });
